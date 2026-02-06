@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Balloon Pop Ultimate</title>
+<style>
+  body { margin:0; font-family: 'Segoe UI', sans-serif; background:#050505; color:#fff; overflow:hidden; touch-action: manipulation; }
+  
+  /* Screens */
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:20px; background: rgba(0,0,0,0.95); z-index: 200; text-align: center; }
+  #gameArea { position:absolute; inset:0; display:none; background: #0a0a0a; overflow: hidden; }
+
+  /* Buttons */
+  button { padding:12px 25px; font-size:16px; cursor:pointer; border-radius: 12px; border: none; color: white; font-weight: bold; transition: 0.2s; }
+  .btn-start { background: #2ed573; width: 180px; font-size: 20px; }
+  .btn-pause { background: #747d8c; }
+  .btn-restart { background: #ffa502; }
+  .btn-home { background: #1e90ff; }
+
+  /* HUD & Controls */
+  #hud { position:fixed; bottom:20px; left:0; right:0; display:flex; justify-content: space-around; font-size:18px; font-weight: bold; z-index: 100; pointer-events: none; }
+  .stat-box { background: rgba(255,255,255,0.1); padding: 8px 15px; border-radius: 15px; border: 1px solid rgba(255,255,255,0.1); }
+  
+  #topControls { position:fixed; top:10px; width: 100%; display: flex; justify-content: center; gap: 8px; z-index: 150; }
+
+  /* Balloon & String System */
+  .balloon-container { position: absolute; bottom: -150px; width: 60px; height: 140px; z-index: 10; pointer-events: auto; }
+  
+  .balloon-body { 
+    position:absolute; top:0; width:60px; height:75px; 
+    border-radius:50%; display:flex; justify-content:center; align-items:center; 
+    font-size:24px; font-weight:bold; color:white; z-index: 2;
+    box-shadow: inset -5px -5px 15px rgba(0,0,0,0.3);
+  }
+
+  .string-line {
+    position: absolute; top: 70px; left: 50%;
+    width: 2px; height: 60px; background: rgba(255,255,255,0.4);
+    transform: translateX(-50%); z-index: 1; /* Balloon ke piche */
+  }
+
+  /* Sparkles/Particles */
+  .particle { position: absolute; width: 6px; height: 6px; border-radius: 50%; pointer-events: none; z-index: 50; }
+</style>
+</head>
+<body>
+
+<!-- Start Menu -->
+<div id="menu" class="screen">
+  <h1 style="font-size: 3rem; color: #ff4757; margin: 0;">🎈 POP IT!</h1>
+  <p>Type or Tap to Play</p>
+  <button class="btn-start" onclick="startGame('easy')">Easy</button>
+  <button class="btn-start" onclick="startGame('medium')" style="background:#eccc68">Medium</button>
+  <button class="btn-start" onclick="startGame('hard')" style="background:#ff4757">Hard</button>
+</div>
+
+<!-- Game Over Screen -->
+<div id="gameOverScreen" class="screen" style="display:none;">
+  <h1 style="color:#ff4757; font-size: 3.5rem;">GAME OVER</h1>
+  <p style="font-size: 1.5rem;">Final Score: <span id="finalScore">0</span></p>
+  <div style="display: flex; gap: 10px;">
+    <button class="btn-restart" onclick="restartFromButton()">🔄 Restart</button>
+    <button class="btn-home" onclick="goHome()">🏠 Home</button>
+  </div>
+</div>
+
+<div id="gameArea"></div>
+
+<!-- Top Buttons (Always Visible during game) -->
+<div id="topControls" style="display: none;">
+  <button class="btn-restart" onclick="restartFromButton()">🔄</button>
+  <button id="pauseBtn" class="btn-pause">⏸</button>
+  <button class="btn-home" onclick="goHome()">🏠</button>
+</div>
+
+<!-- Bottom Stats -->
+<div id="hud" style="display:none;">
+  <div class="stat-box">Score: <span id="score">0</span></div>
+  <div class="stat-box">Miss: <span id="wrong">0</span>/10</div>
+</div>
+
+<script>
+let gameRunning = false, isPaused = false, currentLevel = 'easy';
+let balloons = [], spawnInterval = null;
+let score = 0, wrong = 0, speed = 2, spawnRate = 1500;
+
+// Pop Sound (External URL for better compatibility)
+const popSound = new Audio('https://www.gstatic.com');
+
+const gameArea = document.getElementById('gameArea');
+const scoreEl = document.getElementById('score'), wrongEl = document.getElementById('wrong');
+const menu = document.getElementById('menu'), hud = document.getElementById('hud');
+const pauseBtn = document.getElementById('pauseBtn'), topControls = document.getElementById('topControls');
+const gameOverScreen = document.getElementById('gameOverScreen');
+
+function startGame(level) {
+  currentLevel = level;
+  clearInterval(spawnInterval);
+  resetGame();
+  
+  if(level === 'easy') { speed = 2; spawnRate = 1400; }
+  if(level === 'medium') { speed = 3.5; spawnRate = 950; }
+  if(level === 'hard') { speed = 5.5; spawnRate = 650; }
+
+  menu.style.display = 'none';
+  gameOverScreen.style.display = 'none';
+  gameArea.style.display = 'block';
+  hud.style.display = 'flex';
+  topControls.style.display = 'flex';
+
+  gameRunning = true;
+  isPaused = false;
+  spawnInterval = setInterval(createBalloon, spawnRate);
+  requestAnimationFrame(update);
+}
+
+function resetGame() {
+  gameArea.innerHTML = "";
+  balloons = [];
+  score = 0; wrong = 0;
+  updateHUD();
+}
+
+function createBalloon() {
+  if (!gameRunning || isPaused) return;
+
+  const char = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  
+  // Container for Balloon + String
+  const container = document.createElement('div');
+  container.className = 'balloon-container';
+  
+  // The String (Dhaga)
+  const string = document.createElement('div');
+  string.className = 'string-line';
+  
+  // The Balloon Body
+  const body = document.createElement('div');
+  body.className = 'balloon-body';
+  body.textContent = char;
+  
+  const hue = Math.floor(Math.random() * 360);
+  body.style.background = `radial-gradient(circle at 30% 30%, hsl(${hue}, 80%, 70%), hsl(${hue}, 80%, 40%))`;
+
+  container.appendChild(string); // Back
+  container.appendChild(body);   // Front
+  
+  container.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    popBalloon(container);
+  });
+
+  container.style.left = Math.random() * (window.innerWidth - 70) + 'px';
+  gameArea.appendChild(container);
+  balloons.push({ container, body, char, y: -150 });
+}
+
+function popBalloon(container) {
+  const index = balloons.findIndex(b => b.container === container);
+  if (index > -1) {
+    const b = balloons[index];
+    createParticles(parseFloat(container.style.left) + 30, window.innerHeight - b.y - 40, b.body.style.background);
+    
+    // Play Sound
+    popSound.currentTime = 0;
+    popSound.play().catch(()=>{});
+    
+    container.remove();
+    balloons.splice(index, 1);
+    score += 1;
+    updateHUD();
+  }
+}
+
+function createParticles(x, y, color) {
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = x + 'px';
+    p.style.top = y + 'px';
+    p.style.background = color;
+    gameArea.appendChild(p);
+
+    const angle = Math.random() * Math.PI * 2;
+    const velocity = Math.random() * 5 + 2;
+    let px = x, py = y;
+
+    const moveParticle = () => {
+      px += Math.cos(angle) * velocity;
+      py += Math.sin(angle) * velocity;
+      p.style.left = px + 'px';
+      p.style.top = py + 'px';
+      p.style.opacity = parseFloat(p.style.opacity || 1) - 0.05;
+      
+      if (p.style.opacity > 0) requestAnimationFrame(moveParticle);
+      else p.remove();
+    };
+    requestAnimationFrame(moveParticle);
+  }
+}
+
+function update() {
+  if (!gameRunning) return;
+  if (!isPaused) {
+    for (let i = balloons.length - 1; i >= 0; i--) {
+      let b = balloons[i];
+      b.y += speed;
+      b.container.style.bottom = b.y + 'px';
+
+      if (b.y > window.innerHeight + 150) {
+        b.container.remove();
+        balloons.splice(i, 1);
+        wrong++;
+        updateHUD();
+        if (wrong >= 10) showGameOver();
+      }
+    }
+  }
+  requestAnimationFrame(update);
+}
+
+function updateHUD() {
+  scoreEl.textContent = score;
+  wrongEl.textContent = wrong;
+}
+
+function showGameOver() {
+  gameRunning = false;
+  clearInterval(spawnInterval);
+  document.getElementById('finalScore').textContent = score;
+  gameOverScreen.style.display = 'flex';
+  topControls.style.display = 'none';
+  hud.style.display = 'none';
+}
+
+function restartFromButton() {
+  gameOverScreen.style.display = 'none';
+  startGame(currentLevel);
+}
+
+function goHome() {
+  gameRunning = false;
+  clearInterval(spawnInterval);
+  menu.style.display = 'flex';
+  gameOverScreen.style.display = 'none';
+  gameArea.style.display = 'none';
+  hud.style.display = 'none';
+  topControls.style.display = 'none';
+}
+
+// Keyboard support
+document.addEventListener('keydown', (e) => {
+  if (!gameRunning || isPaused) return;
+  const key = e.key.toUpperCase();
+  const b = balloons.find(b => b.char === key);
+  if (b) popBalloon(b.container);
+});
+
+pauseBtn.addEventListener('click', () => {
+  isPaused = !isPaused;
+  pauseBtn.textContent = isPaused ? '▶' : '⏸';
+});
+
+</script>
+</body>
+</html>
